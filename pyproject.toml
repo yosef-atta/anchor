@@ -1,7 +1,7 @@
 [project]
 name = "anchor"
 version = "0.1.0"
-description = "Add your description here"
+description = "Local project-memory and decision system for agentic software development"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -10,6 +10,13 @@ dependencies = [
     "rich>=15.0.0",
     "typer>=0.27.2",
 ]
+
+[project.scripts]
+anchor = "anchor.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
