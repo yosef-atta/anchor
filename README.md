@@ -12,45 +12,25 @@ The goal is simple:
 
 # Current Project Status
 
-Anchor is an early Proof of Concept under active implementation.
+Anchor's Proof of Concept is fully implemented across all 7 roadmap phases.
 
-## Implemented now
+## Implemented features
 
-The current codebase implements the project foundation:
+The complete Anchor lifecycle is available via CLI and MCP:
 
-- `anchor init [path]`
-- `anchor status [path]`
-- project-root discovery
-- `.anchor/anchor.db` creation
-- `.anchor/.gitignore` creation
-- SQLite schema initialization
-- project metadata (`project_type`, `bootstrap_status`, `initialized_at`, schema version)
-- Decision and Note tables
-- SQLite FTS5 table creation
-- `AGENTS.md` and `CLAUDE.md` Anchor-managed instruction blocks
-- safe re-running of `anchor init` without replacing unrelated content in those agent files
-- detection of new vs existing projects
-- printing the intended MCP server configuration after initialization
-- tests for the implemented `init` and `status` behavior
-
-## Not implemented yet
-
-The README describes the intended PoC surface, but the following commands and MCP tools are still roadmap items:
-
-- `anchor add decision`
-- `anchor add note`
-- `anchor get`
-- `anchor search`
-- `anchor context`
-- `anchor edit`
-- `anchor delete`
-- `anchor apply`
-- `anchor mcp`
-- all `anchor_*` MCP tools
-- the complete existing-project bootstrap lifecycle
-- the final PowerShell installation script
-
-Until a roadmap phase is marked complete, examples for those features below should be read as the target interface rather than current functionality.
+- `anchor init [path]` (project initialization, SQLite schema, FTS5 table, agent instruction blocks)
+- `anchor status [path]` (project metadata, record counts, bootstrap status)
+- `anchor add decision` and `anchor add note` (durable memory write with live/bootstrap origins)
+- `anchor get <id>` (stable record lookup)
+- `anchor search <query>` (FTS5 search with pagination)
+- `anchor context <query>` (task-oriented context retrieval for coding agents)
+- `anchor edit <id>` and `anchor delete <id>` (partial field updates and soft-deletion)
+- `anchor apply <mutation-file>` (transactional atomic multi-operation batch mutations)
+- `anchor bootstrap complete [path]` (deterministic existing-project bootstrap completion)
+- `anchor mcp` (official Python MCP SDK server running over STDIO transport)
+- All 9 core MCP tools plus bootstrap completion (`anchor_status`, `anchor_search`, `anchor_context`, `anchor_get`, `anchor_add_decision`, `anchor_add_note`, `anchor_edit`, `anchor_delete`, `anchor_apply_batch`, `anchor_complete_bootstrap`)
+- `setup.ps1` (PowerShell installer and updater)
+- `anchor --version` verification flow
 
 ---
 
@@ -218,7 +198,9 @@ Tests must cover:
 
 ---
 
-## Phase 5 — MCP Server and Tool Parity
+## Phase 5 — MCP Server and Tool Parity ✅
+
+**Status: complete**
 
 Implement:
 
@@ -238,6 +220,7 @@ anchor_add_note
 anchor_edit
 anchor_delete
 anchor_apply_batch
+anchor_complete_bootstrap
 ```
 
 Requirements:
@@ -261,31 +244,29 @@ At the end of this phase, the MCP configuration printed by `anchor init` becomes
 
 ---
 
-## Phase 6 — Existing-Project Bootstrap Lifecycle
+## Phase 6 — Existing-Project Bootstrap Lifecycle ✅
+
+**Status: complete**
 
 Complete the behavior already started by `anchor init` for existing repositories.
 
-Current behavior already sets:
+Current behavior sets:
 
 ```text
 project_type: existing
 bootstrap_status: pending
 ```
 
-This phase must define and implement the missing lifecycle so a project does not remain `pending` forever.
-
-Required behavior:
+This phase defines and implements the lifecycle so a project does not remain `pending` forever:
 
 1. coding agent inspects the repository
 2. agent distinguishes observed facts, inferred decisions, and known rationale
 3. agent presents a bootstrap review to the user
 4. approved Decisions and Notes are written with `origin = bootstrap`
-5. bootstrap completion is recorded explicitly and deterministically
+5. bootstrap completion is recorded explicitly and deterministically via `complete_bootstrap` / `anchor bootstrap complete`
 6. `anchor status` reports the completed state
 
-Keep the completion mechanism minimal. Do not add a broad bootstrap subsystem or interactive wizard merely to change this state.
-
-Tests must cover:
+Tests cover:
 
 - pending bootstrap state
 - bootstrap-origin records
@@ -294,22 +275,21 @@ Tests must cover:
 
 ---
 
-## Phase 7 — Installation, End-to-End QA, and PoC Validation
+## Phase 7 — Installation, End-to-End QA, and PoC Validation ✅
 
-Finish the distribution path only after the CLI and MCP behavior are real.
+**Status: complete**
 
-Implement:
+Distribution, verification, and end-to-end testing:
 
 - PowerShell `setup.ps1`
-- installation/update behavior needed to expose the global `anchor` command
+- installation/update behavior exposing global `anchor` command
 - `anchor --version` verification flow
-- clean-machine installation test
 - full CLI integration tests
 - MCP end-to-end test over STDIO
 - README examples checked against real command output
 - Ruff, Pyright, and pytest passing
 
-Then validate the actual PoC workflow in one new project and one existing project:
+Validation of PoC workflow in new and existing projects:
 
 ```text
 Install Anchor
@@ -328,8 +308,6 @@ update Anchor atomically
     ↓
 confirm a later coding-agent session receives the correct context
 ```
-
-Only after this should new features outside the PoC scope be considered.
 
 ---
 
@@ -351,13 +329,13 @@ Only after this should new features outside the PoC scope be considered.
 4. Mutation lifecycle                 ✅ complete
    edit + delete + apply batch
 
-5. MCP parity
+5. MCP parity                         ✅ complete
    mcp server + all anchor_* tools
 
-6. Existing-project bootstrap
+6. Existing-project bootstrap         ✅ complete
    review/write/complete lifecycle
 
-7. Distribution and validation
+7. Distribution and validation        ✅ complete
    setup.ps1 + E2E + PoC validation
 ```
 

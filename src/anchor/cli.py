@@ -9,6 +9,7 @@ from anchor.core import (
     add_decision,
     add_note,
     apply_batch,
+    complete_bootstrap,
     delete_record,
     edit_record,
     get_context,
@@ -31,6 +32,13 @@ add_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(add_app, name="add")
+
+bootstrap_app = typer.Typer(
+    name="bootstrap",
+    help="Manage project bootstrap lifecycle.",
+    no_args_is_help=True,
+)
+app.add_typer(bootstrap_app, name="bootstrap")
 
 console = Console()
 
@@ -69,9 +77,9 @@ def init_cmd(
         project_path = result["project_path"]
         is_existing = result["is_existing"]
         mcp_config = result["mcp_config"]
-        
+
         mcp_json_str = json.dumps(mcp_config, indent=2)
-        
+
         console.print(f"[bold green]✓[/bold green] Initialized Anchor in [bold]{project_path}[/bold]")
         console.print("  • SQLite database: [cyan].anchor/anchor.db[/cyan]")
         console.print("  • Agent rules: [cyan]AGENTS.md[/cyan], [cyan]CLAUDE.md[/cyan]")
@@ -79,7 +87,7 @@ def init_cmd(
             console.print("  • Project type: [yellow]existing[/yellow] (bootstrap status: [yellow]pending[/yellow])")
         else:
             console.print("  • Project type: [green]new[/green]")
-            
+
         console.print("\n[bold]MCP Server Configuration:[/bold]")
         console.print(mcp_json_str)
     except Exception as e:
@@ -102,7 +110,7 @@ def status_cmd(
             console.print(f"project: {status['project']}", soft_wrap=True)
             console.print("initialized: false", soft_wrap=True)
             return
-            
+
         console.print(f"project: {status['project']}", soft_wrap=True)
         console.print("initialized: true", soft_wrap=True)
         console.print(f"project_type: {status['project_type']}", soft_wrap=True)
@@ -182,14 +190,18 @@ def get_cmd(
             raise typer.Exit(code=1)
 
         if isinstance(record, DecisionRecord):
-            console.print(f"[bold cyan]{record.id}[/bold cyan] [bold]{record.title}[/bold] [dim]({record.category})[/dim]")
+            console.print(
+                f"[bold cyan]{record.id}[/bold cyan] [bold]{record.title}[/bold] [dim]({record.category})[/dim]"
+            )
             console.print(f"  • Decision: {record.decision}")
             console.print(f"  • Reason: {record.reason}")
             console.print(f"  • Origin: {record.origin.value}")
             console.print(f"  • Created: {record.created_at}")
             console.print(f"  • Updated: {record.updated_at}")
         elif isinstance(record, NoteRecord):
-            console.print(f"[bold cyan]{record.id}[/bold cyan] [bold]{record.title}[/bold] [dim]({record.category})[/dim]")
+            console.print(
+                f"[bold cyan]{record.id}[/bold cyan] [bold]{record.title}[/bold] [dim]({record.category})[/dim]"
+            )
             console.print(f"  • Note: {record.text}")
             console.print(f"  • Origin: {record.origin.value}")
             console.print(f"  • Created: {record.created_at}")
@@ -216,11 +228,15 @@ def search_cmd(
             return
 
         total_pages = (result.total + result.page_size - 1) // result.page_size if result.total > 0 else 1
-        console.print(f"[bold]Search results for:[/bold] '{result.query}' (Total: {result.total}, Page {result.page} of {total_pages})")
+        console.print(
+            f"[bold]Search results for:[/bold] '{result.query}' (Total: {result.total}, Page {result.page} of {total_pages})"
+        )
 
         for item in result.items:
             type_label = "[blue]decision[/blue]" if item.record_type == "decision" else "[magenta]note[/magenta]"
-            console.print(f"  • [bold cyan]{item.id}[/bold cyan] ({type_label}) [bold]{item.title}[/bold] [{item.category}]")
+            console.print(
+                f"  • [bold cyan]{item.id}[/bold cyan] ({type_label}) [bold]{item.title}[/bold] [{item.category}]"
+            )
             console.print(f"    {item.snippet}")
     except Exception as e:
         console.print(f"[bold red]Error searching records:[/bold red] {e}", highlight=False)
@@ -293,7 +309,10 @@ def edit_cmd(
             changes["origin"] = origin
 
         if not changes:
-            console.print("[bold red]Error:[/bold red] No fields provided to edit. Provide at least one field to update.", highlight=False)
+            console.print(
+                "[bold red]Error:[/bold red] No fields provided to edit. Provide at least one field to update.",
+                highlight=False,
+            )
             raise typer.Exit(code=1)
 
         record = edit_record(record_id, changes, project_path=path)
@@ -325,7 +344,9 @@ def delete_cmd(
     try:
         record = delete_record(record_id, project_path=path)
         rec_type = "decision" if isinstance(record, DecisionRecord) else "note"
-        console.print(f"[bold green]✓[/bold green] Soft-deleted {rec_type} [bold cyan]{record.id}[/bold cyan]: {record.title}")
+        console.print(
+            f"[bold green]✓[/bold green] Soft-deleted {rec_type} [bold cyan]{record.id}[/bold cyan]: {record.title}"
+        )
     except typer.Exit:
         raise
     except Exception as e:
@@ -341,7 +362,9 @@ def apply_cmd(
     """Apply a batch of mutations atomically from a JSON file."""
     try:
         result = apply_batch(mutation_file, project_path=path)
-        console.print(f"[bold green]✓[/bold green] Successfully applied [bold]{result.applied}[/bold] batch operations.")
+        console.print(
+            f"[bold green]✓[/bold green] Successfully applied [bold]{result.applied}[/bold] batch operations."
+        )
         for rec in result.records:
             status_desc = "deleted" if rec.deleted_at is not None else "updated/created"
             console.print(f"  • [bold cyan]{rec.id}[/bold cyan]: {rec.title} ({status_desc})")
@@ -352,6 +375,34 @@ def apply_cmd(
         raise typer.Exit(code=1) from e
 
 
+@bootstrap_app.command(name="complete")
+def bootstrap_complete_cmd(
+    path: Path = typer.Argument(
+        default=Path("."),
+        help="Path to project directory (defaults to current directory).",
+        show_default=False,
+    ),
+):
+    """Mark the existing-project bootstrap lifecycle as complete."""
+    try:
+        status = complete_bootstrap(path)
+        console.print(f"[bold green]✓[/bold green] Bootstrap lifecycle complete for [bold]{status['project']}[/bold]")
+        console.print(f"  • Bootstrap status: [green]{status['bootstrap_status']}[/green]")
+        console.print(f"  • Completed at: {status['bootstrap_completed_at']}")
+        console.print(f"  • Active decisions: {status['decisions']}")
+        console.print(f"  • Active notes: {status['notes']}")
+    except Exception as e:
+        console.print(f"[bold red]Error completing bootstrap:[/bold red] {e}", highlight=False)
+        raise typer.Exit(code=1) from e
+
+
+@app.command(name="mcp")
+def mcp_cmd():
+    """Start the Anchor MCP server over STDIO transport."""
+    from anchor.mcp_server import run_mcp_server
+
+    run_mcp_server()
+
+
 if __name__ == "__main__":
     app()
-

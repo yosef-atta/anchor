@@ -39,7 +39,9 @@ def test_add_decision_valid(tmp_path: Path):
     db_path = target_dir / ".anchor" / "anchor.db"
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, seq, title, category, decision, reason, origin, created_at, updated_at, deleted_at FROM decisions WHERE id = 'D-000001'")
+        cursor.execute(
+            "SELECT id, seq, title, category, decision, reason, origin, created_at, updated_at, deleted_at FROM decisions WHERE id = 'D-000001'"
+        )
         row = cursor.fetchone()
         assert row is not None
         assert row[0] == "D-000001"
@@ -89,7 +91,9 @@ def test_add_note_valid(tmp_path: Path):
     db_path = target_dir / ".anchor" / "anchor.db"
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, seq, title, category, text, origin, created_at, updated_at, deleted_at FROM notes WHERE id = 'N-000001'")
+        cursor.execute(
+            "SELECT id, seq, title, category, text, origin, created_at, updated_at, deleted_at FROM notes WHERE id = 'N-000001'"
+        )
         row = cursor.fetchone()
         assert row is not None
         assert row[0] == "N-000001"
@@ -198,12 +202,18 @@ def test_cli_add_decision_and_note(tmp_path: Path):
         [
             "add",
             "decision",
-            "--title", "Primary database",
-            "--category", "database",
-            "--decision", "Use PostgreSQL.",
-            "--reason", "Required for JSONB.",
-            "--origin", "live",
-            "-p", str(target_dir),
+            "--title",
+            "Primary database",
+            "--category",
+            "database",
+            "--decision",
+            "Use PostgreSQL.",
+            "--reason",
+            "Required for JSONB.",
+            "--origin",
+            "live",
+            "-p",
+            str(target_dir),
         ],
     )
     assert res.exit_code == 0
@@ -215,11 +225,16 @@ def test_cli_add_decision_and_note(tmp_path: Path):
         [
             "add",
             "note",
-            "--title", "Dev port",
-            "--category", "dev",
-            "--text", "Port 3000",
-            "--origin", "bootstrap",
-            "-p", str(target_dir),
+            "--title",
+            "Dev port",
+            "--category",
+            "dev",
+            "--text",
+            "Port 3000",
+            "--origin",
+            "bootstrap",
+            "-p",
+            str(target_dir),
         ],
     )
     assert res.exit_code == 0
@@ -246,11 +261,16 @@ def test_cli_validation_errors(tmp_path: Path):
         [
             "add",
             "decision",
-            "--title", "   ",
-            "--category", "database",
-            "--decision", "Use PostgreSQL.",
-            "--reason", "Required for JSONB.",
-            "-p", str(target_dir),
+            "--title",
+            "   ",
+            "--category",
+            "database",
+            "--decision",
+            "Use PostgreSQL.",
+            "--reason",
+            "Required for JSONB.",
+            "-p",
+            str(target_dir),
         ],
     )
     assert res.exit_code != 0
@@ -279,11 +299,16 @@ def test_duplicate_decision_rejected(tmp_path: Path):
         [
             "add",
             "decision",
-            "--title", "Primary database",
-            "--category", "database",
-            "--decision", "Use PostgreSQL.",
-            "--reason", "Required for JSONB and pgvector.",
-            "-p", str(target_dir),
+            "--title",
+            "Primary database",
+            "--category",
+            "database",
+            "--decision",
+            "Use PostgreSQL.",
+            "--reason",
+            "Required for JSONB and pgvector.",
+            "-p",
+            str(target_dir),
         ],
     )
     assert res.exit_code != 0
@@ -311,10 +336,14 @@ def test_duplicate_note_rejected(tmp_path: Path):
         [
             "add",
             "note",
-            "--title", "Local database",
-            "--category", "development",
-            "--text", "PostgreSQL runs through Docker Compose on port 5432.",
-            "-p", str(target_dir),
+            "--title",
+            "Local database",
+            "--category",
+            "development",
+            "--text",
+            "PostgreSQL runs through Docker Compose on port 5432.",
+            "-p",
+            str(target_dir),
         ],
     )
     assert res.exit_code != 0

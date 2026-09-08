@@ -333,7 +333,7 @@ def test_batch_mutation_success(tmp_path: Path):
     # Check state
     status = get_project_status(project_path=target_dir)
     assert status["decisions"] == 2  # d1 updated, new decision added
-    assert status["notes"] == 1      # n1 deleted, new note added
+    assert status["notes"] == 1  # n1 deleted, new note added
 
     # Check d1 updated
     d1_check = get_record(d1.id, project_path=target_dir)
@@ -416,11 +416,16 @@ def test_cli_edit_delete_apply(tmp_path: Path):
         [
             "add",
             "decision",
-            "--title", "Auth method",
-            "--category", "auth",
-            "--decision", "Sessions",
-            "--reason", "Simplicity",
-            "-p", str(target_dir),
+            "--title",
+            "Auth method",
+            "--category",
+            "auth",
+            "--decision",
+            "Sessions",
+            "--reason",
+            "Simplicity",
+            "-p",
+            str(target_dir),
         ],
     )
 
@@ -430,9 +435,12 @@ def test_cli_edit_delete_apply(tmp_path: Path):
         [
             "edit",
             "D-000001",
-            "--decision", "OAuth2 with PKCE",
-            "--reason", "Security standard",
-            "-p", str(target_dir),
+            "--decision",
+            "OAuth2 with PKCE",
+            "--reason",
+            "Security standard",
+            "-p",
+            str(target_dir),
         ],
     )
     assert edit_res.exit_code == 0

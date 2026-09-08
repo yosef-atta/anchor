@@ -12,7 +12,7 @@ runner = CliRunner()
 def test_status_uninitialized(tmp_path: Path):
     target_dir = tmp_path / "empty_proj"
     target_dir.mkdir()
-    
+
     result = runner.invoke(app, ["status", str(target_dir)])
     assert result.exit_code == 0
     assert "initialized: false" in result.output
@@ -22,9 +22,9 @@ def test_status_uninitialized(tmp_path: Path):
 def test_status_initialized_new(tmp_path: Path):
     target_dir = tmp_path / "new_proj"
     target_dir.mkdir()
-    
+
     initialize_project(target_dir)
-    
+
     result = runner.invoke(app, ["status", str(target_dir)])
     assert result.exit_code == 0
     assert "initialized: true" in result.output
@@ -38,22 +38,22 @@ def test_status_initialized_existing_with_records(tmp_path: Path):
     target_dir = tmp_path / "existing_proj"
     target_dir.mkdir()
     (target_dir / "package.json").write_text("{}", encoding="utf-8")
-    
+
     initialize_project(target_dir)
-    
+
     db_path = target_dir / ".anchor" / "anchor.db"
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute(
             "INSERT INTO decisions (id, seq, title, category, decision, reason, origin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("D-000001", 1, "DB Choice", "database", "Use SQLite", "Simple", "live", "2026-01-01", "2026-01-01")
+            ("D-000001", 1, "DB Choice", "database", "Use SQLite", "Simple", "live", "2026-01-01", "2026-01-01"),
         )
         cursor.execute(
             "INSERT INTO notes (id, seq, title, category, text, origin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("N-000001", 1, "Dev Note", "dev", "Dev note content", "live", "2026-01-01", "2026-01-01")
+            ("N-000001", 1, "Dev Note", "dev", "Dev note content", "live", "2026-01-01", "2026-01-01"),
         )
         conn.commit()
-        
+
     result = runner.invoke(app, ["status", str(target_dir)])
     assert result.exit_code == 0
     assert "initialized: true" in result.output

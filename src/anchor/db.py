@@ -50,11 +50,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS anchor_fts USING fts5(
 def init_database(db_path: Path, is_existing_project: bool = False) -> None:
     """Initialize SQLite database with required tables and initial metadata."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
         cursor.executescript(SCHEMA_SQL)
-        
+
         # Set initial metadata if not already set
         cursor.execute("SELECT value FROM metadata WHERE key = 'version'")
         if not cursor.fetchone():
@@ -62,8 +62,14 @@ def init_database(db_path: Path, is_existing_project: bool = False) -> None:
             project_type = "existing" if is_existing_project else "new"
             bootstrap_status = "pending" if is_existing_project else "none"
             cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('project_type', ?)", (project_type,))
-            cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('bootstrap_status', ?)", (bootstrap_status,))
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES ('bootstrap_status', ?)", (bootstrap_status,)
+            )
             from datetime import datetime
-            cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('initialized_at', ?)", (datetime.now(UTC).isoformat(),))
-            
+
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES ('initialized_at', ?)",
+                (datetime.now(UTC).isoformat(),),
+            )
+
         conn.commit()

@@ -41,25 +41,25 @@ def get_project_status(project_path: Path = Path(".")) -> dict[str, Any]:
     """
     resolved = project_path.resolve()
     root = find_project_root(resolved)
-    
+
     if not root:
         return {
             "project": str(resolved),
             "initialized": False,
         }
-        
+
     db_path = root / ".anchor" / "anchor.db"
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT key, value FROM metadata")
         metadata = dict(cursor.fetchall())
-        
+
         cursor.execute("SELECT COUNT(*) FROM decisions WHERE deleted_at IS NULL")
         decisions_count = cursor.fetchone()[0]
-        
+
         cursor.execute("SELECT COUNT(*) FROM notes WHERE deleted_at IS NULL")
         notes_count = cursor.fetchone()[0]
-        
+
     return {
         "project": str(root),
         "initialized": True,
@@ -269,7 +269,9 @@ def _edit_record_db(
         )
         dup = cursor.fetchone()
         if dup:
-            raise ValueError(f"Duplicate decision: an active decision with identical content already exists ({dup[0]}).")
+            raise ValueError(
+                f"Duplicate decision: an active decision with identical content already exists ({dup[0]})."
+            )
 
         cursor.execute(
             """
@@ -317,7 +319,9 @@ def _edit_record_db(
             raise ValueError(f"Invalid field(s) for note update: {', '.join(sorted(unknown_fields))}")
 
         new_title = _validate_non_empty_str(changes["title"], "title") if "title" in changes else note_row[2]
-        new_category = _validate_non_empty_str(changes["category"], "category") if "category" in changes else note_row[3]
+        new_category = (
+            _validate_non_empty_str(changes["category"], "category") if "category" in changes else note_row[3]
+        )
         new_text = _validate_non_empty_str(changes["text"], "text") if "text" in changes else note_row[4]
         new_origin = Origin(changes["origin"]) if "origin" in changes else Origin(note_row[5])
 
@@ -562,7 +566,9 @@ def apply_batch(
         if p.is_file():
             content = p.read_text(encoding="utf-8")
             data = json.loads(content)
-        elif isinstance(batch_input, str) and (batch_input.strip().startswith("{") or batch_input.strip().startswith("[")):
+        elif isinstance(batch_input, str) and (
+            batch_input.strip().startswith("{") or batch_input.strip().startswith("[")
+        ):
             data = json.loads(batch_input)
         else:
             raise ValueError(f"Batch file not found: {batch_input}")
@@ -624,13 +630,13 @@ def update_or_create_doc_file(file_path: Path) -> None:
         return
 
     content = file_path.read_text(encoding="utf-8")
-    
+
     # Pattern to match existing anchor block
     pattern = re.compile(
         rf"{re.escape(ANCHOR_BLOCK_START)}.*?{re.escape(ANCHOR_BLOCK_END)}",
         re.DOTALL,
     )
-    
+
     if pattern.search(content):
         # Replace existing block
         new_content = pattern.sub(ANCHOR_FULL_BLOCK.strip(), content)
@@ -663,36 +669,27 @@ def initialize_project(project_path: Path) -> dict[str, Any]:
     """
     project_path = project_path.resolve()
     project_path.mkdir(parents=True, exist_ok=True)
-    
+
     anchor_dir = project_path / ".anchor"
     anchor_dir.mkdir(parents=True, exist_ok=True)
-    
+
     gitignore_path = anchor_dir / ".gitignore"
     if not gitignore_path.exists():
         gitignore_path.write_text("*\n", encoding="utf-8")
-        
+
     db_path = anchor_dir / "anchor.db"
-    
+
     is_existing = is_directory_existing_project(project_path)
-    
+
     # Initialize SQLite database
     init_database(db_path, is_existing_project=is_existing)
-    
+
     # Create or update AGENTS.md and CLAUDE.md
     update_or_create_doc_file(project_path / "AGENTS.md")
     update_or_create_doc_file(project_path / "CLAUDE.md")
-        
-    mcp_config = {
-        "mcpServers": {
-            "anchor": {
-                "command": "anchor",
-                "args": [
-                    "mcp"
-                ]
-            }
-        }
-    }
-    
+
+    mcp_config = {"mcpServers": {"anchor": {"command": "anchor", "args": ["mcp"]}}}
+
     return {
         "project_path": str(project_path),
         "db_path": str(db_path),
@@ -824,10 +821,11 @@ def get_record(
     return None
 
 
-def sanitize_fts_query(query: str) -> str:
+def sanitize_fts_query(query: str, join_op: str = " OR ") -> str:
     """
     Sanitize and prepare a query string for safe FTS5 execution.
     Extracts tokens and creates prefix-matching quoted tokens to prevent syntax errors.
+    Uses OR disjunction by default so task descriptions retrieve relevant matches.
     Returns empty string if no valid search tokens are found.
     """
     if not query or not query.strip():
@@ -838,8 +836,8 @@ def sanitize_fts_query(query: str) -> str:
         return ""
 
     # Quote each token and add prefix wildcard
-    escaped_tokens = [f'"{token.replace("\"", "\"\"")}"*' for token in tokens]
-    return " ".join(escaped_tokens)
+    escaped_tokens = [f'"{token.replace('"', '""')}"*' for token in tokens]
+    return join_op.join(escaped_tokens)
 
 
 def _make_snippet(text: str, max_len: int = 120) -> str:
@@ -1045,4 +1043,45 @@ def get_context(
     )
 
 
+def complete_bootstrap(project_path: Path = Path(".")) -> dict[str, Any]:
+    """
+    Explicitly and deterministically mark the bootstrap lifecycle as complete.
+    Idempotent: if already complete, records status accurately without errors.
+    """
+    resolved = project_path.resolve()
+    root = find_project_root(resolved)
+    if not root:
+        raise ValueError(f"Project at '{resolved}' is not initialized with Anchor. Run 'anchor init' first.")
 
+    db_path = root / ".anchor" / "anchor.db"
+    now_iso = datetime.now(UTC).isoformat()
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT key, value FROM metadata")
+        meta = dict(cursor.fetchall())
+
+        prev_status = meta.get("bootstrap_status", "none")
+        completed_at = meta.get("bootstrap_completed_at", now_iso)
+
+        if prev_status != "complete":
+            cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('bootstrap_status', 'complete')")
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES ('bootstrap_completed_at', ?)", (now_iso,)
+            )
+            conn.commit()
+            completed_at = now_iso
+
+        cursor.execute("SELECT COUNT(*) FROM decisions WHERE deleted_at IS NULL")
+        decisions_count = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM notes WHERE deleted_at IS NULL")
+        notes_count = cursor.fetchone()[0]
+
+    return {
+        "project": str(root),
+        "bootstrap_status": "complete",
+        "bootstrap_completed_at": completed_at,
+        "decisions": decisions_count,
+        "notes": notes_count,
+    }

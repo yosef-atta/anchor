@@ -214,11 +214,11 @@ def test_search_safe_handling_empty_and_malformed_queries(tmp_path: Path):
     # Malformed queries with unbalanced quotes, syntax characters, colons, boolean operators
     malformed_queries = [
         '"""',
-        'auth AND OR NOT (',
-        'category:auth',
+        "auth AND OR NOT (",
+        "category:auth",
         'cookie" * ^',
-        '(((((((',
-        '::: ;;; !!! ???',
+        "(((((((",
+        "::: ;;; !!! ???",
     ]
     for mq in malformed_queries:
         # Must not raise sqlite3.OperationalError or any uncaught exception
@@ -279,22 +279,33 @@ def test_cli_get_and_search(tmp_path: Path):
     runner.invoke(
         app,
         [
-            "add", "decision",
-            "--title", "Primary database",
-            "--category", "database",
-            "--decision", "Use PostgreSQL.",
-            "--reason", "Required for JSONB.",
-            "-p", str(target_dir),
+            "add",
+            "decision",
+            "--title",
+            "Primary database",
+            "--category",
+            "database",
+            "--decision",
+            "Use PostgreSQL.",
+            "--reason",
+            "Required for JSONB.",
+            "-p",
+            str(target_dir),
         ],
     )
     runner.invoke(
         app,
         [
-            "add", "note",
-            "--title", "Dev port",
-            "--category", "dev",
-            "--text", "Port 3000",
-            "-p", str(target_dir),
+            "add",
+            "note",
+            "--title",
+            "Dev port",
+            "--category",
+            "dev",
+            "--text",
+            "Port 3000",
+            "-p",
+            str(target_dir),
         ],
     )
 

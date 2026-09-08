@@ -172,5 +172,3 @@ class BatchMutation(BaseModel):
 class BatchResult(BaseModel):
     applied: int
     records: list[DecisionRecord | NoteRecord] = Field(default_factory=list)
-
-
