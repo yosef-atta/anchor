@@ -46,17 +46,15 @@ if ($UvPath) {
 Write-Host "• Verifying installation..." -ForegroundColor Cyan
 
 # Refresh environment path in current session if needed
-$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-$MachinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
 $UvBinPath = "$HOME\.local\bin"
-if (Test-Path $UvBinPath -and ($env:Path -notlike "*$UvBinPath*")) {
+if ((Test-Path -Path $UvBinPath) -and ($env:Path -notlike "*$UvBinPath*")) {
     $env:Path = "$UvBinPath;$env:Path"
 }
 
 $AnchorCmd = Get-Command anchor -ErrorAction SilentlyContinue
 
 if ($AnchorCmd) {
-    $VersionOutput = & anchor --version
+    $VersionOutput = & $AnchorCmd.Source --version
     Write-Host "✓ Successfully installed $VersionOutput" -ForegroundColor Green
     Write-Host "Run 'anchor --help' to get started." -ForegroundColor Green
 } else {
