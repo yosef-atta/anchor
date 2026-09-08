@@ -9,7 +9,11 @@ $ErrorActionPreference = "Stop"
 Write-Host "⚓ Installing Anchor..." -ForegroundColor Cyan
 
 # Determine installation source: local repo directory or remote git repo
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path -ErrorAction SilentlyContinue
+$ScriptDir = $null
+if ($MyInvocation -and $MyInvocation.MyCommand -and $MyInvocation.MyCommand.Path) {
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path -ErrorAction SilentlyContinue
+}
+
 if ($ScriptDir -and (Test-Path "$ScriptDir\pyproject.toml")) {
     $InstallSource = $ScriptDir
 } else {
