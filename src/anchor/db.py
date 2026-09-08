@@ -1,6 +1,7 @@
 """Database initialization and schema management for Anchor."""
 
 import sqlite3
+from datetime import UTC
 from pathlib import Path
 
 SCHEMA_SQL = """
@@ -62,7 +63,7 @@ def init_database(db_path: Path, is_existing_project: bool = False) -> None:
             bootstrap_status = "pending" if is_existing_project else "none"
             cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('project_type', ?)", (project_type,))
             cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('bootstrap_status', ?)", (bootstrap_status,))
-            from datetime import datetime, timezone
-            cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('initialized_at', ?)", (datetime.now(timezone.utc).isoformat(),))
+            from datetime import datetime
+            cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('initialized_at', ?)", (datetime.now(UTC).isoformat(),))
             
         conn.commit()

@@ -1,7 +1,8 @@
-import json
 import sqlite3
 from pathlib import Path
+
 from typer.testing import CliRunner
+
 from anchor.cli import app
 
 runner = CliRunner()

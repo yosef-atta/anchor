@@ -83,7 +83,7 @@ Implemented:
 
 ---
 
-## Phase 1 — Memory Write Foundation
+## Phase 1 — Memory Write Foundation ✅
 
 Implement the first real project-memory operations:
 
@@ -333,7 +333,7 @@ Only after this should new features outside the PoC scope be considered.
 0. Foundation                         ✅ complete
    init + status + schema + metadata + agent files
 
-1. Memory writes
+1. Memory writes                      ✅ complete
    add decision + add note
 
 2. Deterministic reads
