@@ -19,6 +19,8 @@ def test_init_command_creates_files(tmp_path: Path):
     
     # Check directory and files
     assert (target_dir / ".anchor" / "anchor.db").exists()
+    assert (target_dir / ".anchor" / ".gitignore").exists()
+    assert (target_dir / ".anchor" / ".gitignore").read_text(encoding="utf-8").strip() == "*"
     agents_content = (target_dir / "AGENTS.md").read_text(encoding="utf-8")
     claude_content = (target_dir / "CLAUDE.md").read_text(encoding="utf-8")
     

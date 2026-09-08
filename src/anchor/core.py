@@ -101,12 +101,18 @@ def is_directory_existing_project(project_path: Path) -> bool:
 def initialize_project(project_path: Path) -> Dict[str, Any]:
     """
     Initialize an Anchor project at the given path.
-    Creates .anchor/anchor.db, AGENTS.md, CLAUDE.md, and initializes metadata.
+    Creates .anchor/anchor.db, .anchor/.gitignore, AGENTS.md, CLAUDE.md, and initializes metadata.
     """
     project_path = project_path.resolve()
     project_path.mkdir(parents=True, exist_ok=True)
     
     anchor_dir = project_path / ".anchor"
+    anchor_dir.mkdir(parents=True, exist_ok=True)
+    
+    gitignore_path = anchor_dir / ".gitignore"
+    if not gitignore_path.exists():
+        gitignore_path.write_text("*\n", encoding="utf-8")
+        
     db_path = anchor_dir / "anchor.db"
     
     is_existing = is_directory_existing_project(project_path)
