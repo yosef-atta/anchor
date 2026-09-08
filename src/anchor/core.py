@@ -8,6 +8,7 @@ from typing import Any
 
 from anchor.db import init_database
 from anchor.models import (
+    ContextResult,
     DecisionInput,
     DecisionRecord,
     NoteInput,
@@ -563,5 +564,100 @@ def search_records(
         page=page,
         page_size=page_size,
         items=items,
+    )
+
+
+def get_context(
+    query: str,
+    project_path: Path = Path("."),
+    include_deleted: bool = False,
+    limit: int | None = None,
+) -> ContextResult:
+    """
+    Retrieve task-oriented context (full Decisions and Notes) using FTS5 ranking.
+    Returns stable ContextResult containing query, decisions list, and notes list.
+    """
+    resolved = project_path.resolve()
+    root = find_project_root(resolved)
+    if not root:
+        raise ValueError(f"Project at '{resolved}' is not initialized with Anchor. Run 'anchor init' first.")
+
+    sanitized = sanitize_fts_query(query)
+    if not sanitized:
+        return ContextResult(
+            query=query,
+            decisions=[],
+            notes=[],
+        )
+
+    db_path = root / ".anchor" / "anchor.db"
+    include_del_int = 1 if include_deleted else 0
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+
+        select_sql = """
+        SELECT
+            f.id,
+            f.record_type,
+            d.seq, d.title, d.category, d.decision, d.reason, d.origin, d.created_at, d.updated_at, d.deleted_at,
+            n.seq, n.title, n.category, n.text, n.origin, n.created_at, n.updated_at, n.deleted_at
+        FROM anchor_fts(?) f
+        LEFT JOIN decisions d ON f.id = d.id AND f.record_type = 'decision'
+        LEFT JOIN notes n ON f.id = n.id AND f.record_type = 'note'
+        WHERE (
+            (f.record_type = 'decision' AND d.id IS NOT NULL AND (d.deleted_at IS NULL OR ? = 1))
+            OR
+            (f.record_type = 'note' AND n.id IS NOT NULL AND (n.deleted_at IS NULL OR ? = 1))
+        )
+        ORDER BY f.rank ASC, COALESCE(d.created_at, n.created_at) DESC, f.id ASC
+        """
+        params: list[Any] = [sanitized, include_del_int, include_del_int]
+        if limit is not None and limit > 0:
+            select_sql += " LIMIT ?"
+            params.append(limit)
+
+        cursor.execute(select_sql, tuple(params))
+        rows = cursor.fetchall()
+
+        decisions: list[DecisionRecord] = []
+        notes: list[NoteRecord] = []
+
+        for row in rows:
+            rec_type = row[1]
+            if rec_type == "decision":
+                decisions.append(
+                    DecisionRecord(
+                        id=row[0],
+                        seq=row[2],
+                        title=row[3],
+                        category=row[4],
+                        decision=row[5],
+                        reason=row[6],
+                        origin=Origin(row[7]),
+                        created_at=row[8],
+                        updated_at=row[9],
+                        deleted_at=row[10],
+                    )
+                )
+            elif rec_type == "note":
+                notes.append(
+                    NoteRecord(
+                        id=row[0],
+                        seq=row[11],
+                        title=row[12],
+                        category=row[13],
+                        text=row[14],
+                        origin=Origin(row[15]),
+                        created_at=row[16],
+                        updated_at=row[17],
+                        deleted_at=row[18],
+                    )
+                )
+
+    return ContextResult(
+        query=query,
+        decisions=decisions,
+        notes=notes,
     )
 

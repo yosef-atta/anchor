@@ -152,7 +152,9 @@ Tests must cover:
 
 ---
 
-## Phase 3 — Task-Oriented Context Retrieval
+## Phase 3 — Task-Oriented Context Retrieval ✅
+
+**Status: complete**
 
 Implement:
 
@@ -341,7 +343,7 @@ Only after this should new features outside the PoC scope be considered.
 2. Deterministic reads                ✅ complete
    get + search
 
-3. Context retrieval
+3. Context retrieval                  ✅ complete
    context
 
 4. Mutation lifecycle

@@ -8,6 +8,7 @@ from anchor import __version__
 from anchor.core import (
     add_decision,
     add_note,
+    get_context,
     get_project_status,
     get_record,
     initialize_project,
@@ -220,6 +221,44 @@ def search_cmd(
             console.print(f"    {item.snippet}")
     except Exception as e:
         console.print(f"[bold red]Error searching records:[/bold red] {e}", highlight=False)
+        raise typer.Exit(code=1) from e
+
+
+@app.command(name="context")
+def context_cmd(
+    query: str = typer.Argument(..., help="Task description or query string to retrieve relevant context."),
+    path: Path = typer.Option(Path("."), "--path", "-p", help="Project path (defaults to current directory)."),
+    json_output: bool = typer.Option(False, "--json", help="Output results as JSON."),
+):
+    """Retrieve relevant project memory context (Decisions and Notes) for a task."""
+    try:
+        result = get_context(query, project_path=path)
+        if json_output:
+            console.print(result.model_dump_json(indent=2))
+            return
+
+        if not result.decisions and not result.notes:
+            console.print(f"No relevant context found for: '{query}'")
+            return
+
+        console.print(f"[bold]Context for:[/bold] '{result.query}'")
+
+        if result.decisions:
+            console.print("\n[bold blue]Decisions:[/bold blue]")
+            for d in result.decisions:
+                console.print(f"  • [bold cyan]{d.id}[/bold cyan] [bold]{d.title}[/bold] [dim]({d.category})[/dim]")
+                console.print(f"    Decision: {d.decision}")
+                console.print(f"    Reason: {d.reason}")
+                console.print(f"    Origin: {d.origin.value}")
+
+        if result.notes:
+            console.print("\n[bold magenta]Notes:[/bold magenta]")
+            for n in result.notes:
+                console.print(f"  • [bold cyan]{n.id}[/bold cyan] [bold]{n.title}[/bold] [dim]({n.category})[/dim]")
+                console.print(f"    Text: {n.text}")
+                console.print(f"    Origin: {n.origin.value}")
+    except Exception as e:
+        console.print(f"[bold red]Error retrieving context:[/bold red] {e}", highlight=False)
         raise typer.Exit(code=1) from e
 
 

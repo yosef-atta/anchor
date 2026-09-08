@@ -113,3 +113,9 @@ class SearchResult(BaseModel):
     page_size: int
     items: list[SearchResultItem]
 
+
+class ContextResult(BaseModel):
+    query: str
+    decisions: list[DecisionRecord] = Field(default_factory=list)
+    notes: list[NoteRecord] = Field(default_factory=list)
+
