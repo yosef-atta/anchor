@@ -7,7 +7,16 @@ from pathlib import Path
 from typing import Any
 
 from anchor.db import init_database
-from anchor.models import DecisionInput, DecisionRecord, NoteInput, NoteRecord
+from anchor.models import (
+    DecisionInput,
+    DecisionRecord,
+    NoteInput,
+    NoteRecord,
+    Origin,
+    RecordType,
+    SearchResult,
+    SearchResultItem,
+)
 from anchor.templates import ANCHOR_BLOCK_END, ANCHOR_BLOCK_START, ANCHOR_FULL_BLOCK
 
 
@@ -306,3 +315,253 @@ def initialize_project(project_path: Path) -> dict[str, Any]:
         "is_existing": is_existing,
         "mcp_config": mcp_config,
     }
+
+
+def get_record(
+    record_id: str,
+    project_path: Path = Path("."),
+    include_deleted: bool = False,
+) -> DecisionRecord | NoteRecord | None:
+    """
+    Retrieve a Decision or Note record by its stable ID.
+    Returns None if not found or if the record is soft-deleted (unless include_deleted=True).
+    Raises ValueError if project is uninitialized.
+    """
+    resolved = project_path.resolve()
+    root = find_project_root(resolved)
+    if not root:
+        raise ValueError(f"Project at '{resolved}' is not initialized with Anchor. Run 'anchor init' first.")
+
+    db_path = root / ".anchor" / "anchor.db"
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+
+        if record_id.startswith("D-"):
+            cursor.execute(
+                """
+                SELECT id, seq, title, category, decision, reason, origin, created_at, updated_at, deleted_at
+                FROM decisions
+                WHERE id = ?
+                """,
+                (record_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                if row[9] is not None and not include_deleted:
+                    return None
+                return DecisionRecord(
+                    id=row[0],
+                    seq=row[1],
+                    title=row[2],
+                    category=row[3],
+                    decision=row[4],
+                    reason=row[5],
+                    origin=Origin(row[6]),
+                    created_at=row[7],
+                    updated_at=row[8],
+                    deleted_at=row[9],
+                )
+        elif record_id.startswith("N-"):
+            cursor.execute(
+                """
+                SELECT id, seq, title, category, text, origin, created_at, updated_at, deleted_at
+                FROM notes
+                WHERE id = ?
+                """,
+                (record_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                if row[8] is not None and not include_deleted:
+                    return None
+                return NoteRecord(
+                    id=row[0],
+                    seq=row[1],
+                    title=row[2],
+                    category=row[3],
+                    text=row[4],
+                    origin=Origin(row[5]),
+                    created_at=row[6],
+                    updated_at=row[7],
+                    deleted_at=row[8],
+                )
+        else:
+            # Check decisions first, then notes
+            cursor.execute(
+                """
+                SELECT id, seq, title, category, decision, reason, origin, created_at, updated_at, deleted_at
+                FROM decisions
+                WHERE id = ?
+                """,
+                (record_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                if row[9] is not None and not include_deleted:
+                    return None
+                return DecisionRecord(
+                    id=row[0],
+                    seq=row[1],
+                    title=row[2],
+                    category=row[3],
+                    decision=row[4],
+                    reason=row[5],
+                    origin=Origin(row[6]),
+                    created_at=row[7],
+                    updated_at=row[8],
+                    deleted_at=row[9],
+                )
+
+            cursor.execute(
+                """
+                SELECT id, seq, title, category, text, origin, created_at, updated_at, deleted_at
+                FROM notes
+                WHERE id = ?
+                """,
+                (record_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                if row[8] is not None and not include_deleted:
+                    return None
+                return NoteRecord(
+                    id=row[0],
+                    seq=row[1],
+                    title=row[2],
+                    category=row[3],
+                    text=row[4],
+                    origin=Origin(row[5]),
+                    created_at=row[6],
+                    updated_at=row[7],
+                    deleted_at=row[8],
+                )
+
+    return None
+
+
+def sanitize_fts_query(query: str) -> str:
+    """
+    Sanitize and prepare a query string for safe FTS5 execution.
+    Extracts tokens and creates prefix-matching quoted tokens to prevent syntax errors.
+    Returns empty string if no valid search tokens are found.
+    """
+    if not query or not query.strip():
+        return ""
+
+    tokens = re.findall(r"[a-zA-Z0-9_\u0080-\uffff]+", query)
+    if not tokens:
+        return ""
+
+    # Quote each token and add prefix wildcard
+    escaped_tokens = [f'"{token.replace("\"", "\"\"")}"*' for token in tokens]
+    return " ".join(escaped_tokens)
+
+
+def _make_snippet(text: str, max_len: int = 120) -> str:
+    """Create a single-line compact snippet from multiline text."""
+    collapsed = " ".join(text.split())
+    if len(collapsed) > max_len:
+        return collapsed[: max_len - 3] + "..."
+    return collapsed
+
+
+def search_records(
+    query: str,
+    project_path: Path = Path("."),
+    page: int = 1,
+    page_size: int = 20,
+    include_deleted: bool = False,
+) -> SearchResult:
+    """
+    Search Anchor memory records using SQLite FTS5 with deterministic ranking,
+    pagination, and soft-delete filtering.
+    """
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 20
+
+    resolved = project_path.resolve()
+    root = find_project_root(resolved)
+    if not root:
+        raise ValueError(f"Project at '{resolved}' is not initialized with Anchor. Run 'anchor init' first.")
+
+    sanitized = sanitize_fts_query(query)
+    if not sanitized:
+        return SearchResult(
+            query=query,
+            total=0,
+            page=page,
+            page_size=page_size,
+            items=[],
+        )
+
+    db_path = root / ".anchor" / "anchor.db"
+    include_del_int = 1 if include_deleted else 0
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+
+        # Count total matching records
+        count_sql = """
+        SELECT COUNT(*)
+        FROM anchor_fts(?) f
+        LEFT JOIN decisions d ON f.id = d.id AND f.record_type = 'decision'
+        LEFT JOIN notes n ON f.id = n.id AND f.record_type = 'note'
+        WHERE (
+            (f.record_type = 'decision' AND d.id IS NOT NULL AND (d.deleted_at IS NULL OR ? = 1))
+            OR
+            (f.record_type = 'note' AND n.id IS NOT NULL AND (n.deleted_at IS NULL OR ? = 1))
+        )
+        """
+        cursor.execute(count_sql, (sanitized, include_del_int, include_del_int))
+        total_count = cursor.fetchone()[0]
+
+        offset = (page - 1) * page_size
+
+        select_sql = """
+        SELECT
+            f.id,
+            f.record_type,
+            f.title,
+            f.category,
+            COALESCE(d.decision, n.text, f.content) AS body,
+            COALESCE(d.origin, n.origin, 'live') AS origin,
+            COALESCE(d.created_at, n.created_at, '') AS created_at
+        FROM anchor_fts(?) f
+        LEFT JOIN decisions d ON f.id = d.id AND f.record_type = 'decision'
+        LEFT JOIN notes n ON f.id = n.id AND f.record_type = 'note'
+        WHERE (
+            (f.record_type = 'decision' AND d.id IS NOT NULL AND (d.deleted_at IS NULL OR ? = 1))
+            OR
+            (f.record_type = 'note' AND n.id IS NOT NULL AND (n.deleted_at IS NULL OR ? = 1))
+        )
+        ORDER BY f.rank ASC, COALESCE(d.created_at, n.created_at) DESC, f.id ASC
+        LIMIT ? OFFSET ?
+        """
+        cursor.execute(select_sql, (sanitized, include_del_int, include_del_int, page_size, offset))
+
+        rows = cursor.fetchall()
+
+        items = [
+            SearchResultItem(
+                id=row[0],
+                record_type=RecordType(row[1]),
+                title=row[2],
+                category=row[3],
+                snippet=_make_snippet(row[4]),
+                origin=Origin(row[5]),
+                created_at=row[6],
+            )
+            for row in rows
+        ]
+
+    return SearchResult(
+        query=query,
+        total=total_count,
+        page=page,
+        page_size=page_size,
+        items=items,
+    )
+

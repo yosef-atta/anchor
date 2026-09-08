@@ -116,7 +116,9 @@ Tests must cover:
 
 ---
 
-## Phase 2 — Deterministic Read Operations
+## Phase 2 — Deterministic Read Operations ✅
+
+**Status: complete**
 
 Implement:
 
@@ -336,7 +338,7 @@ Only after this should new features outside the PoC scope be considered.
 1. Memory writes                      ✅ complete
    add decision + add note
 
-2. Deterministic reads
+2. Deterministic reads                ✅ complete
    get + search
 
 3. Context retrieval

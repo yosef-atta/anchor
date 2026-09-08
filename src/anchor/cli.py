@@ -5,8 +5,15 @@ import typer
 from rich.console import Console
 
 from anchor import __version__
-from anchor.core import add_decision, add_note, get_project_status, initialize_project
-from anchor.models import DecisionInput, NoteInput, Origin
+from anchor.core import (
+    add_decision,
+    add_note,
+    get_project_status,
+    get_record,
+    initialize_project,
+    search_records,
+)
+from anchor.models import DecisionInput, DecisionRecord, NoteInput, NoteRecord, Origin
 
 app = typer.Typer(
     name="anchor",
@@ -158,5 +165,64 @@ def add_note_cmd(
         raise typer.Exit(code=1) from e
 
 
+@app.command(name="get")
+def get_cmd(
+    record_id: str = typer.Argument(..., help="ID of the record to retrieve (e.g. D-000001 or N-000001)."),
+    path: Path = typer.Option(Path("."), "--path", "-p", help="Project path (defaults to current directory)."),
+):
+    """Retrieve a project memory record by ID."""
+    try:
+        record = get_record(record_id, project_path=path)
+        if record is None:
+            console.print(f"[bold red]Error:[/bold red] Record '{record_id}' not found.", highlight=False)
+            raise typer.Exit(code=1)
+
+        if isinstance(record, DecisionRecord):
+            console.print(f"[bold cyan]{record.id}[/bold cyan] [bold]{record.title}[/bold] [dim]({record.category})[/dim]")
+            console.print(f"  • Decision: {record.decision}")
+            console.print(f"  • Reason: {record.reason}")
+            console.print(f"  • Origin: {record.origin.value}")
+            console.print(f"  • Created: {record.created_at}")
+            console.print(f"  • Updated: {record.updated_at}")
+        elif isinstance(record, NoteRecord):
+            console.print(f"[bold cyan]{record.id}[/bold cyan] [bold]{record.title}[/bold] [dim]({record.category})[/dim]")
+            console.print(f"  • Note: {record.text}")
+            console.print(f"  • Origin: {record.origin.value}")
+            console.print(f"  • Created: {record.created_at}")
+            console.print(f"  • Updated: {record.updated_at}")
+    except typer.Exit:
+        raise
+    except Exception as e:
+        console.print(f"[bold red]Error retrieving record:[/bold red] {e}", highlight=False)
+        raise typer.Exit(code=1) from e
+
+
+@app.command(name="search")
+def search_cmd(
+    query: str = typer.Argument(..., help="Search query string."),
+    page: int = typer.Option(1, "--page", help="Page number for pagination (starts at 1)."),
+    page_size: int = typer.Option(20, "--page-size", help="Number of items per page (default: 20)."),
+    path: Path = typer.Option(Path("."), "--path", "-p", help="Project path (defaults to current directory)."),
+):
+    """Search project memory records using full-text search."""
+    try:
+        result = search_records(query, project_path=path, page=page, page_size=page_size)
+        if not result.items:
+            console.print(f"No results found for query: '{query}'")
+            return
+
+        total_pages = (result.total + result.page_size - 1) // result.page_size if result.total > 0 else 1
+        console.print(f"[bold]Search results for:[/bold] '{result.query}' (Total: {result.total}, Page {result.page} of {total_pages})")
+
+        for item in result.items:
+            type_label = "[blue]decision[/blue]" if item.record_type == "decision" else "[magenta]note[/magenta]"
+            console.print(f"  • [bold cyan]{item.id}[/bold cyan] ({type_label}) [bold]{item.title}[/bold] [{item.category}]")
+            console.print(f"    {item.snippet}")
+    except Exception as e:
+        console.print(f"[bold red]Error searching records:[/bold red] {e}", highlight=False)
+        raise typer.Exit(code=1) from e
+
+
 if __name__ == "__main__":
     app()
+

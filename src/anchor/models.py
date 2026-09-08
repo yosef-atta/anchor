@@ -89,3 +89,27 @@ class NoteRecord(BaseModel):
     created_at: str
     updated_at: str
     deleted_at: str | None = None
+
+
+class RecordType(StrEnum):
+    DECISION = "decision"
+    NOTE = "note"
+
+
+class SearchResultItem(BaseModel):
+    id: str
+    record_type: RecordType
+    title: str
+    category: str
+    snippet: str
+    origin: Origin
+    created_at: str
+
+
+class SearchResult(BaseModel):
+    query: str
+    total: int
+    page: int
+    page_size: int
+    items: list[SearchResultItem]
+
