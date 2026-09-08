@@ -9,7 +9,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 
 from anchor import __version__
-from anchor.core import initialize_project
+from anchor.core import get_project_status, initialize_project
 
 app = typer.Typer(
     name="anchor",
@@ -70,6 +70,33 @@ def init_cmd(
         console.print(mcp_json_str)
     except Exception as e:
         console.print(f"[bold red]Error initializing project:[/bold red] {e}", highlight=False)
+        raise typer.Exit(code=1)
+
+
+@app.command(name="status")
+def status_cmd(
+    path: Path = typer.Argument(
+        default=Path("."),
+        help="Path to project directory (defaults to current directory).",
+        show_default=False,
+    ),
+):
+    """Show current Anchor project status."""
+    try:
+        status = get_project_status(path)
+        if not status["initialized"]:
+            console.print(f"project: {status['project']}", soft_wrap=True)
+            console.print("initialized: false", soft_wrap=True)
+            return
+            
+        console.print(f"project: {status['project']}", soft_wrap=True)
+        console.print("initialized: true", soft_wrap=True)
+        console.print(f"project_type: {status['project_type']}", soft_wrap=True)
+        console.print(f"bootstrap_status: {status['bootstrap_status']}", soft_wrap=True)
+        console.print(f"decisions: {status['decisions']}", soft_wrap=True)
+        console.print(f"notes: {status['notes']}", soft_wrap=True)
+    except Exception as e:
+        console.print(f"[bold red]Error getting project status:[/bold red] {e}", highlight=False)
         raise typer.Exit(code=1)
 
 

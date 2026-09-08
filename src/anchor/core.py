@@ -2,10 +2,57 @@
 
 import json
 import re
+import sqlite3
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from anchor.db import init_database
 from anchor.templates import ANCHOR_BLOCK_START, ANCHOR_BLOCK_END, ANCHOR_FULL_BLOCK
+
+
+def find_project_root(start_path: Path = Path(".")) -> Optional[Path]:
+    """Find the root directory of an Anchor project by searching upward for .anchor/anchor.db."""
+    current = start_path.resolve()
+    for directory in [current, *current.parents]:
+        if (directory / ".anchor" / "anchor.db").is_file():
+            return directory
+    return None
+
+
+def get_project_status(project_path: Path = Path(".")) -> Dict[str, Any]:
+    """
+    Get current Anchor status for the project at project_path.
+    Returns status dictionary including initialization state, metadata, and record counts.
+    """
+    resolved = project_path.resolve()
+    root = find_project_root(resolved)
+    
+    if not root:
+        return {
+            "project": str(resolved),
+            "initialized": False,
+        }
+        
+    db_path = root / ".anchor" / "anchor.db"
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT key, value FROM metadata")
+        metadata = dict(cursor.fetchall())
+        
+        cursor.execute("SELECT COUNT(*) FROM decisions WHERE deleted_at IS NULL")
+        decisions_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM notes WHERE deleted_at IS NULL")
+        notes_count = cursor.fetchone()[0]
+        
+    return {
+        "project": str(root),
+        "initialized": True,
+        "project_type": metadata.get("project_type", "unknown"),
+        "bootstrap_status": metadata.get("bootstrap_status", "none"),
+        "decisions": decisions_count,
+        "notes": notes_count,
+    }
+
 
 
 def update_or_create_doc_file(file_path: Path) -> None:
