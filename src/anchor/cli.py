@@ -8,6 +8,9 @@ from anchor import __version__
 from anchor.core import (
     add_decision,
     add_note,
+    apply_batch,
+    delete_record,
+    edit_record,
     get_context,
     get_project_status,
     get_record,
@@ -259,6 +262,93 @@ def context_cmd(
                 console.print(f"    Origin: {n.origin.value}")
     except Exception as e:
         console.print(f"[bold red]Error retrieving context:[/bold red] {e}", highlight=False)
+        raise typer.Exit(code=1) from e
+
+
+@app.command(name="edit")
+def edit_cmd(
+    record_id: str = typer.Argument(..., help="ID of the record to edit (e.g. D-000001 or N-000001)."),
+    title: str | None = typer.Option(None, "--title", help="New title."),
+    category: str | None = typer.Option(None, "--category", help="New category."),
+    decision: str | None = typer.Option(None, "--decision", help="New decision text (decisions only)."),
+    reason: str | None = typer.Option(None, "--reason", help="New reason rationale (decisions only)."),
+    text: str | None = typer.Option(None, "--text", help="New note text (notes only)."),
+    origin: Origin | None = typer.Option(None, "--origin", help="New origin (live or bootstrap)."),
+    path: Path = typer.Option(Path("."), "--path", "-p", help="Project path (defaults to current directory)."),
+):
+    """Edit an existing decision or note in project memory."""
+    try:
+        changes: dict[str, str | Origin] = {}
+        if title is not None:
+            changes["title"] = title
+        if category is not None:
+            changes["category"] = category
+        if decision is not None:
+            changes["decision"] = decision
+        if reason is not None:
+            changes["reason"] = reason
+        if text is not None:
+            changes["text"] = text
+        if origin is not None:
+            changes["origin"] = origin
+
+        if not changes:
+            console.print("[bold red]Error:[/bold red] No fields provided to edit. Provide at least one field to update.", highlight=False)
+            raise typer.Exit(code=1)
+
+        record = edit_record(record_id, changes, project_path=path)
+        console.print(f"[bold green]✓[/bold green] Updated record [bold cyan]{record.id}[/bold cyan]: {record.title}")
+        if isinstance(record, DecisionRecord):
+            console.print(f"  • Category: {record.category}")
+            console.print(f"  • Decision: {record.decision}")
+            console.print(f"  • Reason: {record.reason}")
+            console.print(f"  • Origin: {record.origin.value}")
+            console.print(f"  • Updated at: {record.updated_at}")
+        elif isinstance(record, NoteRecord):
+            console.print(f"  • Category: {record.category}")
+            console.print(f"  • Text: {record.text}")
+            console.print(f"  • Origin: {record.origin.value}")
+            console.print(f"  • Updated at: {record.updated_at}")
+    except typer.Exit:
+        raise
+    except Exception as e:
+        console.print(f"[bold red]Error editing record:[/bold red] {e}", highlight=False)
+        raise typer.Exit(code=1) from e
+
+
+@app.command(name="delete")
+def delete_cmd(
+    record_id: str = typer.Argument(..., help="ID of the record to delete (e.g. D-000001 or N-000001)."),
+    path: Path = typer.Option(Path("."), "--path", "-p", help="Project path (defaults to current directory)."),
+):
+    """Soft-delete an existing decision or note from project memory."""
+    try:
+        record = delete_record(record_id, project_path=path)
+        rec_type = "decision" if isinstance(record, DecisionRecord) else "note"
+        console.print(f"[bold green]✓[/bold green] Soft-deleted {rec_type} [bold cyan]{record.id}[/bold cyan]: {record.title}")
+    except typer.Exit:
+        raise
+    except Exception as e:
+        console.print(f"[bold red]Error deleting record:[/bold red] {e}", highlight=False)
+        raise typer.Exit(code=1) from e
+
+
+@app.command(name="apply")
+def apply_cmd(
+    mutation_file: Path = typer.Argument(..., help="Path to JSON file containing batch mutations."),
+    path: Path = typer.Option(Path("."), "--path", "-p", help="Project path (defaults to current directory)."),
+):
+    """Apply a batch of mutations atomically from a JSON file."""
+    try:
+        result = apply_batch(mutation_file, project_path=path)
+        console.print(f"[bold green]✓[/bold green] Successfully applied [bold]{result.applied}[/bold] batch operations.")
+        for rec in result.records:
+            status_desc = "deleted" if rec.deleted_at is not None else "updated/created"
+            console.print(f"  • [bold cyan]{rec.id}[/bold cyan]: {rec.title} ({status_desc})")
+    except typer.Exit:
+        raise
+    except Exception as e:
+        console.print(f"[bold red]Error applying batch:[/bold red] {e}", highlight=False)
         raise typer.Exit(code=1) from e
 
 

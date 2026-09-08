@@ -1,8 +1,9 @@
 """Data models and validation schemas for Anchor."""
 
 from enum import StrEnum
+from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Origin(StrEnum):
@@ -118,4 +119,58 @@ class ContextResult(BaseModel):
     query: str
     decisions: list[DecisionRecord] = Field(default_factory=list)
     notes: list[NoteRecord] = Field(default_factory=list)
+
+
+class BatchAction(StrEnum):
+    EDIT = "edit"
+    DELETE = "delete"
+    ADD_DECISION = "add_decision"
+    ADD_NOTE = "add_note"
+
+
+class BatchOperation(BaseModel):
+    action: BatchAction
+    id: str | None = None
+    changes: dict[str, Any] | None = None
+    data: dict[str, Any] | None = None
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def normalize_action(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v_clean = v.lower().strip().replace("-", "_")
+            if v_clean == "add_decision":
+                return BatchAction.ADD_DECISION
+            if v_clean == "add_note":
+                return BatchAction.ADD_NOTE
+            if v_clean == "edit":
+                return BatchAction.EDIT
+            if v_clean == "delete":
+                return BatchAction.DELETE
+        return v
+
+    @model_validator(mode="after")
+    def validate_operation_fields(self) -> "BatchOperation":
+        if self.action == BatchAction.EDIT:
+            if not self.id:
+                raise ValueError("'id' is required for 'edit' operation.")
+            if self.changes is None or len(self.changes) == 0:
+                raise ValueError("'changes' dictionary with at least one field is required for 'edit' operation.")
+        elif self.action == BatchAction.DELETE:
+            if not self.id:
+                raise ValueError("'id' is required for 'delete' operation.")
+        elif self.action in (BatchAction.ADD_DECISION, BatchAction.ADD_NOTE):
+            if not self.data:
+                raise ValueError(f"'data' dictionary is required for '{self.action.value}' operation.")
+        return self
+
+
+class BatchMutation(BaseModel):
+    operations: list[BatchOperation] = Field(..., min_length=1)
+
+
+class BatchResult(BaseModel):
+    applied: int
+    records: list[DecisionRecord | NoteRecord] = Field(default_factory=list)
+
 

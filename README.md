@@ -182,7 +182,9 @@ Tests must cover:
 
 ---
 
-## Phase 4 — Mutation Lifecycle and Atomic Batch
+## Phase 4 — Mutation Lifecycle and Atomic Batch ✅
+
+**Status: complete**
 
 Implement:
 
@@ -346,7 +348,7 @@ Only after this should new features outside the PoC scope be considered.
 3. Context retrieval                  ✅ complete
    context
 
-4. Mutation lifecycle
+4. Mutation lifecycle                 ✅ complete
    edit + delete + apply batch
 
 5. MCP parity

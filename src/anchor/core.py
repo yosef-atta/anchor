@@ -8,6 +8,9 @@ from typing import Any
 
 from anchor.db import init_database
 from anchor.models import (
+    BatchAction,
+    BatchMutation,
+    BatchResult,
     ContextResult,
     DecisionInput,
     DecisionRecord,
@@ -17,6 +20,7 @@ from anchor.models import (
     RecordType,
     SearchResult,
     SearchResultItem,
+    _validate_non_empty_str,
 )
 from anchor.templates import ANCHOR_BLOCK_END, ANCHOR_BLOCK_START, ANCHOR_FULL_BLOCK
 
@@ -66,6 +70,385 @@ def get_project_status(project_path: Path = Path(".")) -> dict[str, Any]:
     }
 
 
+def _add_decision_db(cursor: sqlite3.Cursor, input_data: DecisionInput, now_iso: str) -> DecisionRecord:
+    """Insert a decision record and its FTS entry using an existing cursor/transaction."""
+    cursor.execute(
+        """
+        SELECT id FROM decisions
+        WHERE deleted_at IS NULL
+          AND title = ?
+          AND category = ?
+          AND decision = ?
+          AND reason = ?
+        """,
+        (input_data.title, input_data.category, input_data.decision, input_data.reason),
+    )
+    dup = cursor.fetchone()
+    if dup:
+        raise ValueError(f"Duplicate decision: an active decision with identical content already exists ({dup[0]}).")
+
+    cursor.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM decisions")
+    next_seq = cursor.fetchone()[0]
+    decision_id = f"D-{next_seq:06d}"
+
+    cursor.execute(
+        """
+        INSERT INTO decisions (id, seq, title, category, decision, reason, origin, created_at, updated_at, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+        """,
+        (
+            decision_id,
+            next_seq,
+            input_data.title,
+            input_data.category,
+            input_data.decision,
+            input_data.reason,
+            input_data.origin.value,
+            now_iso,
+            now_iso,
+        ),
+    )
+
+    cursor.execute(
+        """
+        INSERT INTO anchor_fts (id, record_type, title, category, content, reason)
+        VALUES (?, 'decision', ?, ?, ?, ?)
+        """,
+        (
+            decision_id,
+            input_data.title,
+            input_data.category,
+            input_data.decision,
+            input_data.reason,
+        ),
+    )
+
+    return DecisionRecord(
+        id=decision_id,
+        seq=next_seq,
+        title=input_data.title,
+        category=input_data.category,
+        decision=input_data.decision,
+        reason=input_data.reason,
+        origin=input_data.origin,
+        created_at=now_iso,
+        updated_at=now_iso,
+        deleted_at=None,
+    )
+
+
+def _add_note_db(cursor: sqlite3.Cursor, input_data: NoteInput, now_iso: str) -> NoteRecord:
+    """Insert a note record and its FTS entry using an existing cursor/transaction."""
+    cursor.execute(
+        """
+        SELECT id FROM notes
+        WHERE deleted_at IS NULL
+          AND title = ?
+          AND category = ?
+          AND text = ?
+        """,
+        (input_data.title, input_data.category, input_data.text),
+    )
+    dup = cursor.fetchone()
+    if dup:
+        raise ValueError(f"Duplicate note: an active note with identical content already exists ({dup[0]}).")
+
+    cursor.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM notes")
+    next_seq = cursor.fetchone()[0]
+    note_id = f"N-{next_seq:06d}"
+
+    cursor.execute(
+        """
+        INSERT INTO notes (id, seq, title, category, text, origin, created_at, updated_at, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+        """,
+        (
+            note_id,
+            next_seq,
+            input_data.title,
+            input_data.category,
+            input_data.text,
+            input_data.origin.value,
+            now_iso,
+            now_iso,
+        ),
+    )
+
+    cursor.execute(
+        """
+        INSERT INTO anchor_fts (id, record_type, title, category, content, reason)
+        VALUES (?, 'note', ?, ?, ?, '')
+        """,
+        (
+            note_id,
+            input_data.title,
+            input_data.category,
+            input_data.text,
+        ),
+    )
+
+    return NoteRecord(
+        id=note_id,
+        seq=next_seq,
+        title=input_data.title,
+        category=input_data.category,
+        text=input_data.text,
+        origin=input_data.origin,
+        created_at=now_iso,
+        updated_at=now_iso,
+        deleted_at=None,
+    )
+
+
+def _edit_record_db(
+    cursor: sqlite3.Cursor,
+    record_id: str,
+    changes: dict[str, Any],
+    now_iso: str,
+) -> DecisionRecord | NoteRecord:
+    """Edit a decision or note record in the database using an existing cursor/transaction."""
+    if not changes:
+        raise ValueError("No changes provided to update.")
+
+    # Check if record is in decisions
+    cursor.execute(
+        """
+        SELECT id, seq, title, category, decision, reason, origin, created_at, updated_at, deleted_at
+        FROM decisions
+        WHERE id = ?
+        """,
+        (record_id,),
+    )
+    dec_row = cursor.fetchone()
+
+    # Check if record is in notes
+    cursor.execute(
+        """
+        SELECT id, seq, title, category, text, origin, created_at, updated_at, deleted_at
+        FROM notes
+        WHERE id = ?
+        """,
+        (record_id,),
+    )
+    note_row = cursor.fetchone()
+
+    if not dec_row and not note_row:
+        raise ValueError(f"Record '{record_id}' not found.")
+
+    if dec_row:
+        if dec_row[9] is not None:
+            raise ValueError(f"Cannot edit deleted record '{record_id}'.")
+
+        # Validate fields for Decision
+        if "text" in changes:
+            raise ValueError(f"Cannot apply note field 'text' to decision record '{record_id}'.")
+
+        allowed_fields = {"title", "category", "decision", "reason", "origin"}
+        unknown_fields = set(changes.keys()) - allowed_fields
+        if unknown_fields:
+            raise ValueError(f"Invalid field(s) for decision update: {', '.join(sorted(unknown_fields))}")
+
+        new_title = _validate_non_empty_str(changes["title"], "title") if "title" in changes else dec_row[2]
+        new_category = _validate_non_empty_str(changes["category"], "category") if "category" in changes else dec_row[3]
+        new_decision = _validate_non_empty_str(changes["decision"], "decision") if "decision" in changes else dec_row[4]
+        new_reason = _validate_non_empty_str(changes["reason"], "reason") if "reason" in changes else dec_row[5]
+        new_origin = Origin(changes["origin"]) if "origin" in changes else Origin(dec_row[6])
+
+        # Check for active duplicate decision
+        cursor.execute(
+            """
+            SELECT id FROM decisions
+            WHERE deleted_at IS NULL
+              AND id != ?
+              AND title = ?
+              AND category = ?
+              AND decision = ?
+              AND reason = ?
+            """,
+            (record_id, new_title, new_category, new_decision, new_reason),
+        )
+        dup = cursor.fetchone()
+        if dup:
+            raise ValueError(f"Duplicate decision: an active decision with identical content already exists ({dup[0]}).")
+
+        cursor.execute(
+            """
+            UPDATE decisions
+            SET title = ?, category = ?, decision = ?, reason = ?, origin = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (new_title, new_category, new_decision, new_reason, new_origin.value, now_iso, record_id),
+        )
+
+        cursor.execute(
+            """
+            UPDATE anchor_fts
+            SET title = ?, category = ?, content = ?, reason = ?
+            WHERE id = ?
+            """,
+            (new_title, new_category, new_decision, new_reason, record_id),
+        )
+
+        return DecisionRecord(
+            id=record_id,
+            seq=dec_row[1],
+            title=new_title,
+            category=new_category,
+            decision=new_decision,
+            reason=new_reason,
+            origin=new_origin,
+            created_at=dec_row[7],
+            updated_at=now_iso,
+            deleted_at=None,
+        )
+
+    else:
+        assert note_row is not None
+        if note_row[8] is not None:
+            raise ValueError(f"Cannot edit deleted record '{record_id}'.")
+
+        # Validate fields for Note
+        if "decision" in changes or "reason" in changes:
+            raise ValueError(f"Cannot apply decision field(s) to note record '{record_id}'.")
+
+        allowed_fields = {"title", "category", "text", "origin"}
+        unknown_fields = set(changes.keys()) - allowed_fields
+        if unknown_fields:
+            raise ValueError(f"Invalid field(s) for note update: {', '.join(sorted(unknown_fields))}")
+
+        new_title = _validate_non_empty_str(changes["title"], "title") if "title" in changes else note_row[2]
+        new_category = _validate_non_empty_str(changes["category"], "category") if "category" in changes else note_row[3]
+        new_text = _validate_non_empty_str(changes["text"], "text") if "text" in changes else note_row[4]
+        new_origin = Origin(changes["origin"]) if "origin" in changes else Origin(note_row[5])
+
+        # Check for active duplicate note
+        cursor.execute(
+            """
+            SELECT id FROM notes
+            WHERE deleted_at IS NULL
+              AND id != ?
+              AND title = ?
+              AND category = ?
+              AND text = ?
+            """,
+            (record_id, new_title, new_category, new_text),
+        )
+        dup = cursor.fetchone()
+        if dup:
+            raise ValueError(f"Duplicate note: an active note with identical content already exists ({dup[0]}).")
+
+        cursor.execute(
+            """
+            UPDATE notes
+            SET title = ?, category = ?, text = ?, origin = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (new_title, new_category, new_text, new_origin.value, now_iso, record_id),
+        )
+
+        cursor.execute(
+            """
+            UPDATE anchor_fts
+            SET title = ?, category = ?, content = ?, reason = ''
+            WHERE id = ?
+            """,
+            (new_title, new_category, new_text, record_id),
+        )
+
+        return NoteRecord(
+            id=record_id,
+            seq=note_row[1],
+            title=new_title,
+            category=new_category,
+            text=new_text,
+            origin=new_origin,
+            created_at=note_row[6],
+            updated_at=now_iso,
+            deleted_at=None,
+        )
+
+
+def _delete_record_db(
+    cursor: sqlite3.Cursor,
+    record_id: str,
+    now_iso: str,
+) -> DecisionRecord | NoteRecord:
+    """Soft delete a decision or note record in the database using an existing cursor/transaction."""
+    cursor.execute(
+        """
+        SELECT id, seq, title, category, decision, reason, origin, created_at, updated_at, deleted_at
+        FROM decisions
+        WHERE id = ?
+        """,
+        (record_id,),
+    )
+    dec_row = cursor.fetchone()
+
+    cursor.execute(
+        """
+        SELECT id, seq, title, category, text, origin, created_at, updated_at, deleted_at
+        FROM notes
+        WHERE id = ?
+        """,
+        (record_id,),
+    )
+    note_row = cursor.fetchone()
+
+    if not dec_row and not note_row:
+        raise ValueError(f"Record '{record_id}' not found.")
+
+    if dec_row:
+        if dec_row[9] is not None:
+            raise ValueError(f"Record '{record_id}' is already deleted.")
+
+        cursor.execute(
+            """
+            UPDATE decisions
+            SET deleted_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (now_iso, now_iso, record_id),
+        )
+
+        return DecisionRecord(
+            id=record_id,
+            seq=dec_row[1],
+            title=dec_row[2],
+            category=dec_row[3],
+            decision=dec_row[4],
+            reason=dec_row[5],
+            origin=Origin(dec_row[6]),
+            created_at=dec_row[7],
+            updated_at=now_iso,
+            deleted_at=now_iso,
+        )
+    else:
+        assert note_row is not None
+        if note_row[8] is not None:
+            raise ValueError(f"Record '{record_id}' is already deleted.")
+
+        cursor.execute(
+            """
+            UPDATE notes
+            SET deleted_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (now_iso, now_iso, record_id),
+        )
+
+        return NoteRecord(
+            id=record_id,
+            seq=note_row[1],
+            title=note_row[2],
+            category=note_row[3],
+            text=note_row[4],
+            origin=Origin(note_row[5]),
+            created_at=note_row[6],
+            updated_at=now_iso,
+            deleted_at=now_iso,
+        )
+
+
 def add_decision(input_data: DecisionInput, project_path: Path = Path(".")) -> DecisionRecord:
     """
     Transactionally insert a new decision record and its FTS entry.
@@ -82,72 +465,10 @@ def add_decision(input_data: DecisionInput, project_path: Path = Path(".")) -> D
 
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
-
-        # Check for active duplicate decision
-        cursor.execute(
-            """
-            SELECT id FROM decisions
-            WHERE deleted_at IS NULL
-              AND title = ?
-              AND category = ?
-              AND decision = ?
-              AND reason = ?
-            """,
-            (input_data.title, input_data.category, input_data.decision, input_data.reason),
-        )
-        dup = cursor.fetchone()
-        if dup:
-            raise ValueError(f"Duplicate decision: an active decision with identical content already exists ({dup[0]}).")
-
-        cursor.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM decisions")
-        next_seq = cursor.fetchone()[0]
-        decision_id = f"D-{next_seq:06d}"
-
-        cursor.execute(
-            """
-            INSERT INTO decisions (id, seq, title, category, decision, reason, origin, created_at, updated_at, deleted_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-            """,
-            (
-                decision_id,
-                next_seq,
-                input_data.title,
-                input_data.category,
-                input_data.decision,
-                input_data.reason,
-                input_data.origin.value,
-                now_iso,
-                now_iso,
-            ),
-        )
-
-        cursor.execute(
-            """
-            INSERT INTO anchor_fts (id, record_type, title, category, content, reason)
-            VALUES (?, 'decision', ?, ?, ?, ?)
-            """,
-            (
-                decision_id,
-                input_data.title,
-                input_data.category,
-                input_data.decision,
-                input_data.reason,
-            ),
-        )
+        record = _add_decision_db(cursor, input_data, now_iso)
         conn.commit()
 
-    return DecisionRecord(
-        id=decision_id,
-        seq=next_seq,
-        title=input_data.title,
-        category=input_data.category,
-        decision=input_data.decision,
-        reason=input_data.reason,
-        origin=input_data.origin,
-        created_at=now_iso,
-        updated_at=now_iso,
-        deleted_at=None,
-    )
+    return record
 
 
 def add_note(input_data: NoteInput, project_path: Path = Path(".")) -> NoteRecord:
@@ -166,67 +487,129 @@ def add_note(input_data: NoteInput, project_path: Path = Path(".")) -> NoteRecor
 
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
-
-        # Check for active duplicate note
-        cursor.execute(
-            """
-            SELECT id FROM notes
-            WHERE deleted_at IS NULL
-              AND title = ?
-              AND category = ?
-              AND text = ?
-            """,
-            (input_data.title, input_data.category, input_data.text),
-        )
-        dup = cursor.fetchone()
-        if dup:
-            raise ValueError(f"Duplicate note: an active note with identical content already exists ({dup[0]}).")
-
-        cursor.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM notes")
-        next_seq = cursor.fetchone()[0]
-        note_id = f"N-{next_seq:06d}"
-
-        cursor.execute(
-            """
-            INSERT INTO notes (id, seq, title, category, text, origin, created_at, updated_at, deleted_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
-            """,
-            (
-                note_id,
-                next_seq,
-                input_data.title,
-                input_data.category,
-                input_data.text,
-                input_data.origin.value,
-                now_iso,
-                now_iso,
-            ),
-        )
-
-        cursor.execute(
-            """
-            INSERT INTO anchor_fts (id, record_type, title, category, content, reason)
-            VALUES (?, 'note', ?, ?, ?, '')
-            """,
-            (
-                note_id,
-                input_data.title,
-                input_data.category,
-                input_data.text,
-            ),
-        )
+        record = _add_note_db(cursor, input_data, now_iso)
         conn.commit()
 
-    return NoteRecord(
-        id=note_id,
-        seq=next_seq,
-        title=input_data.title,
-        category=input_data.category,
-        text=input_data.text,
-        origin=input_data.origin,
-        created_at=now_iso,
-        updated_at=now_iso,
-        deleted_at=None,
+    return record
+
+
+def edit_record(
+    record_id: str,
+    changes: dict[str, Any],
+    project_path: Path = Path("."),
+) -> DecisionRecord | NoteRecord:
+    """
+    Transactionally update an existing decision or note record.
+    Synchronizes SQLite table and FTS5 table, validates type-specific fields,
+    and updates the updated_at timestamp.
+    """
+    resolved = project_path.resolve()
+    root = find_project_root(resolved)
+    if not root:
+        raise ValueError(f"Project at '{resolved}' is not initialized with Anchor. Run 'anchor init' first.")
+
+    db_path = root / ".anchor" / "anchor.db"
+    now_iso = datetime.now(UTC).isoformat()
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        record = _edit_record_db(cursor, record_id, changes, now_iso)
+        conn.commit()
+
+    return record
+
+
+def delete_record(
+    record_id: str,
+    project_path: Path = Path("."),
+) -> DecisionRecord | NoteRecord:
+    """
+    Transactionally soft-delete an existing decision or note record
+    by setting its deleted_at and updated_at timestamps.
+    """
+    resolved = project_path.resolve()
+    root = find_project_root(resolved)
+    if not root:
+        raise ValueError(f"Project at '{resolved}' is not initialized with Anchor. Run 'anchor init' first.")
+
+    db_path = root / ".anchor" / "anchor.db"
+    now_iso = datetime.now(UTC).isoformat()
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        record = _delete_record_db(cursor, record_id, now_iso)
+        conn.commit()
+
+    return record
+
+
+def apply_batch(
+    batch_input: Path | str | dict[str, Any] | BatchMutation,
+    project_path: Path = Path("."),
+) -> BatchResult:
+    """
+    Execute a batch of mutations (edits, deletes, adds) within a single SQLite transaction.
+    If any operation fails, the entire transaction is rolled back and an error is raised.
+    """
+    import json
+
+    if isinstance(batch_input, BatchMutation):
+        mutation = batch_input
+    elif isinstance(batch_input, dict):
+        mutation = BatchMutation.model_validate(batch_input)
+    elif isinstance(batch_input, (str, Path)):
+        p = Path(batch_input)
+        if p.is_file():
+            content = p.read_text(encoding="utf-8")
+            data = json.loads(content)
+        elif isinstance(batch_input, str) and (batch_input.strip().startswith("{") or batch_input.strip().startswith("[")):
+            data = json.loads(batch_input)
+        else:
+            raise ValueError(f"Batch file not found: {batch_input}")
+        mutation = BatchMutation.model_validate(data)
+    else:
+        raise ValueError(f"Invalid batch input type: {type(batch_input)}")
+
+    resolved = project_path.resolve()
+    root = find_project_root(resolved)
+    if not root:
+        raise ValueError(f"Project at '{resolved}' is not initialized with Anchor. Run 'anchor init' first.")
+
+    db_path = root / ".anchor" / "anchor.db"
+    now_iso = datetime.now(UTC).isoformat()
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        results: list[DecisionRecord | NoteRecord] = []
+        try:
+            for op in mutation.operations:
+                if op.action == BatchAction.EDIT:
+                    assert op.id is not None
+                    assert op.changes is not None
+                    rec = _edit_record_db(cursor, op.id, op.changes, now_iso)
+                    results.append(rec)
+                elif op.action == BatchAction.DELETE:
+                    assert op.id is not None
+                    rec = _delete_record_db(cursor, op.id, now_iso)
+                    results.append(rec)
+                elif op.action == BatchAction.ADD_DECISION:
+                    assert op.data is not None
+                    dec_in = DecisionInput.model_validate(op.data)
+                    rec = _add_decision_db(cursor, dec_in, now_iso)
+                    results.append(rec)
+                elif op.action == BatchAction.ADD_NOTE:
+                    assert op.data is not None
+                    note_in = NoteInput.model_validate(op.data)
+                    rec = _add_note_db(cursor, note_in, now_iso)
+                    results.append(rec)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    return BatchResult(
+        applied=len(results),
+        records=results,
     )
 
 
@@ -660,4 +1043,6 @@ def get_context(
         decisions=decisions,
         notes=notes,
     )
+
+
 
